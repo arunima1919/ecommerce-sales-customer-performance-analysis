@@ -1,3 +1,7 @@
+-- ====================================================
+-- Customer Sales Analysis
+-- ====================================================
+
 -- 1. Number of orders per actual customer
 
 SELECT
@@ -463,44 +467,7 @@ GROUP BY category
 ORDER BY revenue DESC
 LIMIT 15;
 
-
--- 16. Average number of items per order by customer type
-
-WITH customer_orders AS (
-    SELECT
-        c.customer_unique_id,
-        o.order_id,
-        CASE
-            WHEN COUNT(*) OVER (
-                PARTITION BY c.customer_unique_id
-            ) > 1
-            THEN 'Repeat customer'
-            ELSE 'One-time customer'
-        END AS customer_type
-    FROM customers c
-    JOIN orders o
-        ON c.customer_id = o.customer_id
-),
-order_items_count AS (
-    SELECT
-        co.customer_type,
-        co.order_id,
-        COUNT(oi.order_item_id) AS item_count
-    FROM customer_orders co
-    JOIN order_items oi
-        ON co.order_id = oi.order_id
-    GROUP BY
-        co.customer_type,
-        co.order_id
-)
-SELECT
-    customer_type,
-    ROUND(AVG(item_count), 2) AS avg_items_per_order
-FROM order_items_count
-GROUP BY customer_type;
-
-
--- 17. Repeat rate by product category
+-- 16. Repeat rate by product category
 
 WITH customer_category AS (
     SELECT DISTINCT
@@ -555,85 +522,3 @@ LEFT JOIN category_translation ct
 GROUP BY category
 HAVING COUNT(*) >= 100
 ORDER BY repeat_rate DESC;
-
-
--- 18. Categories with the most repeat customers
-
-WITH customer_category AS (
-    SELECT DISTINCT
-        c.customer_unique_id,
-        p.product_category_name
-    FROM customers c
-    JOIN orders o
-        ON c.customer_id = o.customer_id
-    JOIN order_items oi
-        ON o.order_id = oi.order_id
-    JOIN products p
-        ON oi.product_id = p.product_id
-    WHERE p.product_category_name IS NOT NULL
-),
-repeat_customers AS (
-    SELECT
-        c.customer_unique_id
-    FROM customers c
-    JOIN orders o
-        ON c.customer_id = o.customer_id
-    GROUP BY c.customer_unique_id
-    HAVING COUNT(DISTINCT o.order_id) > 1
-)
-SELECT
-    COALESCE(
-        ct.product_category_name_english,
-        cc.product_category_name,
-        'Unknown'
-    ) AS category,
-    COUNT(DISTINCT cc.customer_unique_id) AS repeat_customers
-FROM customer_category cc
-JOIN repeat_customers rc
-    ON cc.customer_unique_id = rc.customer_unique_id
-LEFT JOIN category_translation ct
-    ON cc.product_category_name = ct.product_category_name
-GROUP BY category
-ORDER BY repeat_customers DESC
-LIMIT 15;
-
-
--- 19. Top categories by revenue per repeat customer
-
-WITH repeat_customers AS (
-    SELECT
-        c.customer_unique_id
-    FROM customers c
-    JOIN orders o
-        ON c.customer_id = o.customer_id
-    GROUP BY c.customer_unique_id
-    HAVING COUNT(DISTINCT o.order_id) > 1
-)
-SELECT
-    COALESCE(
-        ct.product_category_name_english,
-        p.product_category_name,
-        'Unknown'
-    ) AS category,
-    COUNT(DISTINCT c.customer_unique_id) AS repeat_customers,
-    ROUND(SUM(oi.price), 2) AS revenue,
-    ROUND(
-        SUM(oi.price) /
-        COUNT(DISTINCT c.customer_unique_id),
-        2
-    ) AS revenue_per_repeat_customer
-FROM customers c
-JOIN orders o
-    ON c.customer_id = o.customer_id
-JOIN order_items oi
-    ON o.order_id = oi.order_id
-JOIN products p
-    ON oi.product_id = p.product_id
-JOIN repeat_customers rc
-    ON c.customer_unique_id = rc.customer_unique_id
-LEFT JOIN category_translation ct
-    ON p.product_category_name = ct.product_category_name
-GROUP BY category
-HAVING COUNT(DISTINCT c.customer_unique_id) >= 50
-ORDER BY revenue_per_repeat_customer DESC
-LIMIT 15;

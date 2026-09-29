@@ -1,7 +1,6 @@
 -- ============================================================
--- POWER BI VIEWS
+-- Power BI dashboard views and KPI calculations
 -- ============================================================
-
 
 -- ============================================================
 -- VIEW 1: MONTHLY SALES
@@ -18,19 +17,19 @@ SELECT
     COUNT(DISTINCT o.order_id) AS orders,
 
     ROUND(
-        SUM(oi.price),
+        COALESCE(SUM(oi.price), 0),
         2
     ) AS revenue,
 
     ROUND(
-        SUM(oi.price)
-        / COUNT(DISTINCT o.order_id),
+        COALESCE(SUM(oi.price), 0)
+        / NULLIF(COUNT(DISTINCT o.order_id), 0),
         2
     ) AS aov
 
 FROM orders o
 
-JOIN order_items oi
+LEFT JOIN order_items oi
     ON o.order_id = oi.order_id
 
 GROUP BY
@@ -417,6 +416,418 @@ ORDER BY revenue DESC;
 
 
 -- ============================================================
+-- VIEW 6: TOTAL CUSTOMERS
+-- ============================================================
+
+CREATE OR REPLACE VIEW vw_total_customers AS
+
+SELECT
+    COUNT(DISTINCT customer_unique_id)
+        AS total_customers
+
+FROM customers;
+
+
+-- ============================================================
+-- VIEW 7: OVERALL AVERAGE ORDER VALUE
+-- ============================================================
+
+CREATE OR REPLACE VIEW vw_overall_aov AS
+
+SELECT
+    ROUND(
+        SUM(oi.price)
+        / COUNT(DISTINCT o.order_id),
+        2
+    ) AS average_order_value
+
+FROM orders o
+
+LEFT JOIN order_items oi
+    ON o.order_id = oi.order_id;
+
+
+-- ============================================================
+-- VIEW 8: PAYMENT METHODS
+-- ============================================================
+
+CREATE OR REPLACE VIEW vw_payment_methods AS
+
+SELECT
+    payment_type,
+
+    COUNT(*) AS payment_count,
+
+    ROUND(
+        COUNT(*) * 100.0
+        / SUM(COUNT(*)) OVER (),
+        2
+    ) AS payment_percentage
+
+FROM payments
+
+GROUP BY payment_type
+
+ORDER BY payment_count DESC;
+
+
+-- ============================================================
+-- VIEW 9: CUSTOMER KPIs
+-- ============================================================
+
+CREATE OR REPLACE VIEW vw_customer_kpis AS
+
+WITH customer_orders AS (
+
+    SELECT
+        c.customer_unique_id,
+
+        COUNT(DISTINCT o.order_id)
+            AS order_count,
+
+        COALESCE(
+            SUM(oi.price),
+            0
+        ) AS revenue
+
+    FROM customers c
+
+    JOIN orders o
+        ON c.customer_id = o.customer_id
+
+    LEFT JOIN order_items oi
+        ON o.order_id = oi.order_id
+
+    GROUP BY c.customer_unique_id
+)
+
+SELECT
+    COUNT(*) AS total_customers,
+
+    SUM(
+        CASE
+            WHEN order_count = 1 THEN 1
+            ELSE 0
+        END
+    ) AS one_time_customers,
+
+    SUM(
+        CASE
+            WHEN order_count > 1 THEN 1
+            ELSE 0
+        END
+    ) AS repeat_customers,
+
+    ROUND(
+        100.0
+        * SUM(
+            CASE
+                WHEN order_count > 1 THEN 1
+                ELSE 0
+            END
+        )
+        / COUNT(*),
+        2
+    ) AS repeat_customer_rate,
+
+    ROUND(
+        AVG(revenue),
+        2
+    ) AS avg_customer_revenue
+
+FROM customer_orders;
+
+
+-- ============================================================
+-- VIEW 10: CUSTOMER TYPE
+-- ============================================================
+
+CREATE OR REPLACE VIEW vw_customer_type AS
+
+WITH customer_orders AS (
+
+    SELECT
+        c.customer_unique_id,
+
+        COUNT(DISTINCT o.order_id)
+            AS order_count
+
+    FROM customers c
+
+    JOIN orders o
+        ON c.customer_id = o.customer_id
+
+    GROUP BY c.customer_unique_id
+)
+
+SELECT
+    CASE
+        WHEN order_count = 1
+            THEN 'One-time'
+        ELSE 'Repeat'
+    END AS customer_type,
+
+    COUNT(*) AS customer_count
+
+FROM customer_orders
+
+GROUP BY
+    CASE
+        WHEN order_count = 1
+            THEN 'One-time'
+        ELSE 'Repeat'
+    END;
+
+
+-- ============================================================
+-- VIEW 11: DELIVERY KPIs
+-- ============================================================
+
+DROP VIEW IF EXISTS vw_delivery_kpis;
+
+CREATE VIEW vw_delivery_kpis AS
+
+WITH delivery_kpi AS (
+
+    SELECT
+        COUNT(*) AS total_orders,
+
+        COUNT(*) FILTER (
+            WHERE order_status = 'delivered'
+        ) AS delivered_orders,
+
+        ROUND(
+            100.0
+            * COUNT(*) FILTER (
+                WHERE order_status = 'delivered'
+            )
+            / COUNT(*),
+            2
+        ) AS delivery_rate,
+
+        ROUND(
+            100.0
+            * COUNT(*) FILTER (
+                WHERE order_status = 'delivered'
+                  AND order_delivered_customer_date
+                      <= order_estimated_delivery_date
+            )
+            / NULLIF(
+                COUNT(*) FILTER (
+                    WHERE order_status = 'delivered'
+                ),
+                0
+            ),
+            2
+        ) AS on_time_delivery_percent,
+
+        ROUND(
+            AVG(
+                EXTRACT(
+                    EPOCH FROM (
+                        order_delivered_customer_date
+                        - order_purchase_timestamp
+                    )
+                ) / 86400
+            ) FILTER (
+                WHERE order_status = 'delivered'
+            ),
+            2
+        ) AS avg_delivery_days
+
+    FROM orders
+),
+
+review_kpi AS (
+
+    SELECT
+        ROUND(
+            AVG(review_score),
+            2
+        ) AS avg_review_score
+
+    FROM reviews
+)
+
+SELECT
+    d.total_orders,
+    d.delivered_orders,
+    d.delivery_rate,
+    d.on_time_delivery_percent,
+    d.avg_delivery_days,
+    r.avg_review_score
+
+FROM delivery_kpi d
+
+CROSS JOIN review_kpi r;
+
+
+-- ============================================================
+-- VIEW 12: DELIVERY STATUS
+-- ============================================================
+
+CREATE OR REPLACE VIEW vw_delivery_status AS
+
+SELECT
+    CASE
+        WHEN order_delivered_customer_date
+             <= order_estimated_delivery_date
+            THEN 'On Time'
+        ELSE 'Late'
+    END AS delivery_status,
+
+    COUNT(*) AS order_count
+
+FROM orders
+
+WHERE order_status = 'delivered'
+
+GROUP BY 1;
+
+
+-- ============================================================
+-- VIEW 13: DELIVERY TIME BUCKETS
+-- ============================================================
+
+CREATE OR REPLACE VIEW vw_delivery_time_buckets AS
+
+WITH delivery_days AS (
+
+    SELECT
+        EXTRACT(
+            EPOCH FROM (
+                order_delivered_customer_date
+                - order_purchase_timestamp
+            )
+        ) / 86400 AS days
+
+    FROM orders
+
+    WHERE order_status = 'delivered'
+)
+
+SELECT
+    CASE
+        WHEN days <= 7
+            THEN '0–7 days'
+
+        WHEN days <= 14
+            THEN '8–14 days'
+
+        WHEN days <= 21
+            THEN '15–21 days'
+
+        ELSE '22+ days'
+
+    END AS delivery_time_bucket,
+
+    CASE
+        WHEN days <= 7 THEN 1
+        WHEN days <= 14 THEN 2
+        WHEN days <= 21 THEN 3
+        ELSE 4
+    END AS sort_order,
+
+    COUNT(*) AS order_count
+
+FROM delivery_days
+
+GROUP BY 1, 2
+
+ORDER BY sort_order;
+
+
+-- ============================================================
+-- VIEW 14: DELIVERY TIME VS REVIEW SCORE
+-- ============================================================
+
+CREATE OR REPLACE VIEW vw_delivery_time_review AS
+
+WITH delivery_data AS (
+
+    SELECT
+        o.order_id,
+
+        EXTRACT(
+            EPOCH FROM (
+                o.order_delivered_customer_date
+                - o.order_purchase_timestamp
+            )
+        ) / 86400 AS days
+
+    FROM orders o
+
+    WHERE o.order_status = 'delivered'
+),
+
+review_per_order AS (
+
+    SELECT
+        order_id,
+
+        AVG(review_score) AS review_score
+
+    FROM reviews
+
+    GROUP BY order_id
+)
+
+SELECT
+    CASE
+        WHEN d.days <= 7
+            THEN '0–7 days'
+
+        WHEN d.days <= 14
+            THEN '8–14 days'
+
+        WHEN d.days <= 21
+            THEN '15–21 days'
+
+        ELSE '22+ days'
+
+    END AS delivery_time_bucket,
+
+    CASE
+        WHEN d.days <= 7 THEN 1
+        WHEN d.days <= 14 THEN 2
+        WHEN d.days <= 21 THEN 3
+        ELSE 4
+    END AS sort_order,
+
+    ROUND(
+        AVG(r.review_score),
+        2
+    ) AS avg_review_score
+
+FROM delivery_data d
+
+JOIN review_per_order r
+    ON d.order_id = r.order_id
+
+GROUP BY 1, 2
+
+ORDER BY sort_order;
+
+-- ============================================================
+-- VIEW 15: REVIEW SCORE DISTRIBUTION
+-- ============================================================
+
+CREATE OR REPLACE VIEW vw_review_score_distribution AS
+
+SELECT
+    review_score,
+
+    COUNT(*) AS review_count
+
+FROM reviews
+
+WHERE review_score IS NOT NULL
+
+GROUP BY review_score
+
+ORDER BY review_score;
+
+-- ============================================================
 -- CHECK ALL POWER BI VIEWS
 -- ============================================================
 
@@ -439,3 +850,43 @@ FROM vw_delivery_reviews;
 
 SELECT *
 FROM vw_product_category;
+
+
+SELECT *
+FROM vw_total_customers;
+
+
+SELECT *
+FROM vw_overall_aov;
+
+
+SELECT *
+FROM vw_payment_methods;
+
+
+SELECT *
+FROM vw_customer_kpis;
+
+
+SELECT *
+FROM vw_customer_type;
+
+
+SELECT *
+FROM vw_delivery_kpis;
+
+
+SELECT *
+FROM vw_delivery_status;
+
+
+SELECT *
+FROM vw_delivery_time_buckets;
+
+
+SELECT *
+FROM vw_delivery_time_review;
+
+
+SELECT *
+FROM vw_review_score_distribution;

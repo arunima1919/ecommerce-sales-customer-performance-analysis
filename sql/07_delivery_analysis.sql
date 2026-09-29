@@ -1,3 +1,7 @@
+-- ============================================================
+-- Delivery performance and logistics analysis
+-- ============================================================
+
 -- 1. Overall delivery performance
 
 SELECT

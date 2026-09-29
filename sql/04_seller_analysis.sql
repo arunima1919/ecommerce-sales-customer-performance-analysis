@@ -1,3 +1,6 @@
+-- ==========================================================
+-- Seller Performance Analysis
+-- ==========================================================
 -- 1. Top sellers by revenue
 
 SELECT
@@ -25,7 +28,7 @@ ORDER BY total_orders DESC
 LIMIT 20;
 
 
--- 3. Seller performance summary
+-- 3. Overall seller marketplace summary
 
 SELECT
     COUNT(DISTINCT seller_id) AS active_sellers,

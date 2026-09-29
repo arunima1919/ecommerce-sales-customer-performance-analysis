@@ -1,3 +1,7 @@
+-- ============================================================
+-- Geographic and state-level customer analysis
+-- ============================================================
+
 -- 1. Orders by customer state
 
 SELECT
@@ -189,15 +193,22 @@ ORDER BY repeat_customer_rate DESC;
 
 -- 9. Average review score by state
 
+WITH review_per_order AS (
+    SELECT
+        order_id,
+        AVG(review_score) AS review_score
+    FROM reviews
+    GROUP BY order_id
+)
 SELECT
     c.customer_state,
     COUNT(*) AS review_count,
-    ROUND(AVG(r.review_score), 2)
+    ROUND(AVG(r.review_score)::numeric, 2)
         AS average_review_score
 FROM customers c
 JOIN orders o
     ON c.customer_id = o.customer_id
-JOIN reviews r
+JOIN review_per_order r
     ON o.order_id = r.order_id
 GROUP BY c.customer_state
 ORDER BY average_review_score DESC;

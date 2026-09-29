@@ -1,3 +1,7 @@
+-- ============================================================
+-- Product and category performance analysis
+-- ============================================================
+
 -- 1. Top categories by revenue
 
 SELECT
